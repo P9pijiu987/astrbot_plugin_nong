@@ -1,0 +1,9 @@
+name: astrbot_plugin_nong
+display_name: 农伙伴
+desc: 通过 /加入农伙伴、/召集农伙伴、/退出农伙伴 管理并召集群内农伙伴
+help: 输入 /加入农伙伴 [@群友（可选）] 添加成员，/召集农伙伴 一键@名单，/退出农伙伴 退出名单
+version: v1.0.0
+author: hephaestus
+astrbot_version: ">=4.9.2,<5"
+support_platforms:
+  - aiocqhttp
