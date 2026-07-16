@@ -1,0 +1,50 @@
+{
+  "summon_cooldown_seconds": {
+    "description": "召集冷却时间（秒）",
+    "type": "int",
+    "default": 300,
+    "hint": "设为 0 可关闭频率限制。"
+  },
+  "cooldown_scope": {
+    "description": "冷却计算范围",
+    "type": "string",
+    "default": "game",
+    "options": ["game", "user"],
+    "hint": "game：同一群同一游戏共用冷却；user：每个人单独计算。"
+  },
+  "admin_bypass_cooldown": {
+    "description": "AstrBot 管理员不受召集冷却限制",
+    "type": "bool",
+    "default": true
+  },
+  "admin_can_summon_without_membership": {
+    "description": "AstrBot 管理员未加入伙伴时也可召集",
+    "type": "bool",
+    "default": false
+  },
+  "allow_self_join": {
+    "description": "允许群友自助加入游戏伙伴",
+    "type": "bool",
+    "default": true
+  },
+  "allow_invite": {
+    "description": "启用邀请加入功能",
+    "type": "bool",
+    "default": true
+  },
+  "invite_requires_membership": {
+    "description": "只允许已加入该游戏伙伴的人发起邀请",
+    "type": "bool",
+    "default": false
+  },
+  "invite_expire_minutes": {
+    "description": "邀请有效期（分钟）",
+    "type": "int",
+    "default": 10
+  },
+  "max_game_name_length": {
+    "description": "游戏名最大字符数",
+    "type": "int",
+    "default": 16
+  }
+}
