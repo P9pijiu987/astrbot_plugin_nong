@@ -105,8 +105,13 @@ class FakePlugin(plugin_module.NongPartnerPlugin):
 class PluginLogicTests(unittest.IsolatedAsyncioTestCase):
     async def test_join_invite_accept_and_member_summon(self):
         plugin = FakePlugin({"summon_cooldown_seconds": 0})
-        joined = await plugin._join(FakeEvent("1"), "group", "1", "原神")
-        self.assertIn("加入成功", joined[1])
+        requested = await plugin._join(FakeEvent("1"), "group", "1", "原神")
+        self.assertIn("已申请创建", requested[1])
+
+        approved = await plugin._approve_creation(
+            FakeEvent("10", admin=True), "group", "10", "原神"
+        )
+        self.assertEqual(approved[0], "chain")
 
         invited = await plugin._invite(
             FakeEvent("1", mentions=["2"]), "group", "1", "原神"
@@ -121,7 +126,9 @@ class PluginLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mentioned, ["1", "2"])
 
     async def test_non_member_cannot_summon(self):
-        plugin = FakePlugin({"summon_cooldown_seconds": 0})
+        plugin = FakePlugin(
+            {"summon_cooldown_seconds": 0, "require_creation_approval": False}
+        )
         await plugin._join(FakeEvent("1"), "group", "1", "农")
         result = await plugin._summon(FakeEvent("2"), "group", "2", "农")
         self.assertIn("只有农伙伴", result[1])
@@ -131,6 +138,48 @@ class PluginLogicTests(unittest.IsolatedAsyncioTestCase):
         plugin.storage["nong_partners:group"] = ["7", "8"]
         state = await plugin._load_state("group")
         self.assertEqual(state["games"]["农"]["members"], ["7", "8"])
+
+    async def test_only_admin_can_approve_and_delete(self):
+        plugin = FakePlugin()
+        await plugin._join(FakeEvent("1"), "group", "1", "星际")
+
+        denied = await plugin._approve_creation(
+            FakeEvent("2"), "group", "2", "星际"
+        )
+        self.assertIn("只有 AstrBot 管理员", denied[1])
+
+        await plugin._approve_creation(
+            FakeEvent("10", admin=True), "group", "10", "星际"
+        )
+        denied_delete = await plugin._delete_game(
+            FakeEvent("2"), "group", "2", "星际"
+        )
+        self.assertIn("只有 AstrBot 管理员", denied_delete[1])
+
+        deleted = await plugin._delete_game(
+            FakeEvent("10", admin=True), "group", "10", "星际"
+        )
+        self.assertIn("已删除星际伙伴", deleted[1])
+
+    async def test_multiple_requesters_join_after_approval(self):
+        plugin = FakePlugin()
+        await plugin._join(FakeEvent("1"), "group", "1", "文明")
+        await plugin._join(FakeEvent("2"), "group", "2", "文明")
+        await plugin._approve_creation(
+            FakeEvent("10", admin=True), "group", "10", "文明"
+        )
+        state = await plugin._load_state("group")
+        self.assertEqual(state["games"]["文明"]["members"], ["1", "2"])
+
+    async def test_disabling_review_promotes_existing_request(self):
+        plugin = FakePlugin()
+        await plugin._join(FakeEvent("1"), "group", "1", "红警")
+        plugin.config["require_creation_approval"] = False
+        result = await plugin._join(FakeEvent("1"), "group", "1", "红警")
+        self.assertIn("创建并加入", result[1])
+        state = await plugin._load_state("group")
+        self.assertEqual(state["games"]["红警"]["members"], ["1"])
+        self.assertNotIn("红警", state["pending_creations"])
 
 
 if __name__ == "__main__":

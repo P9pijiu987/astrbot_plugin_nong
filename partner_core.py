@@ -17,18 +17,22 @@ _FIXED_COMMANDS = {
     "伙伴help": "help",
     "伙伴列表": "list",
     "我的伙伴": "mine",
+    "待审核伙伴": "pending",
 }
 
 _DYNAMIC_COMMAND = re.compile(
-    r"^(?P<action>邀请加入|同意加入|拒绝加入|加入|退出|召集|查看)"
+    r"^(?P<action>邀请加入|同意加入|拒绝加入|同意创建|拒绝创建|"
+    r"加入|退出|召集|查看|删除)"
     r"(?P<game>.+?)伙伴(?:\s|$)"
 )
 
 # Prevent unrelated group messages from activating this plugin and waking AstrBot.
 # AstrBot may already have removed the configured wake prefix before filtering.
 PARTNER_FILTER_PATTERN = re.compile(
-    r"^[／/]?(?:(?:伙伴帮助|游戏伙伴帮助|伙伴help|伙伴列表|我的伙伴)\s*$|"
-    r"(?:邀请加入|同意加入|拒绝加入|加入|退出|召集|查看).+?伙伴(?:\s|$))",
+    r"^[／/]?(?:(?:伙伴帮助|游戏伙伴帮助|伙伴help|伙伴列表|"
+    r"我的伙伴|待审核伙伴)\s*$|"
+    r"(?:邀请加入|同意加入|拒绝加入|同意创建|拒绝创建|"
+    r"加入|退出|召集|查看|删除).+?伙伴(?:\s|$))",
     re.IGNORECASE,
 )
 
