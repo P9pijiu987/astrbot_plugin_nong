@@ -2,7 +2,7 @@ name: astrbot_plugin_nong
 display_name: 游戏伙伴
 desc: 为群聊中的任意游戏建立伙伴名单，支持自助加入、邀请确认、退出、查看和限频召集
 help: 输入 /伙伴帮助 查看全部指令
-version: v2.0.0
+version: v2.1.0
 author: hephaestus
 astrbot_version: ">=4.9.2,<5"
 support_platforms:

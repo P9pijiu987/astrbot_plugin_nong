@@ -58,6 +58,8 @@ class NongPartnerPlugin(Star):
             return await self._list_games(event, group_id)
         if command.action == "mine":
             return await self._list_mine(event, group_id, sender_id)
+        if command.action == "pending":
+            return await self._list_pending(event, group_id)
 
         game, error = validate_game_name(
             command.game or "", self._int_config("max_game_name_length", 16, minimum=1)
@@ -74,6 +76,9 @@ class NongPartnerPlugin(Star):
             "退出": self._leave,
             "召集": self._summon,
             "查看": self._show,
+            "同意创建": self._approve_creation,
+            "拒绝创建": self._deny_creation,
+            "删除": self._delete_game,
         }
         handler = handlers.get(command.action)
         if handler is None:
@@ -85,8 +90,52 @@ class NongPartnerPlugin(Star):
             return event.plain_result("本群已关闭自助加入，请联系管理员。")
         async with self._group_locks[group_id]:
             state = await self._load_state(group_id)
-            record = self._ensure_game(state, game, sender_id)
+            key = game_key(game)
+            record = state["games"].get(key)
+            created_directly = False
+            if record is None and self._bool_config("require_creation_approval", True):
+                pending = state["pending_creations"].setdefault(
+                    key,
+                    {
+                        "name": game,
+                        "requesters": [],
+                        "created_at": time.time(),
+                    },
+                )
+                requesters = pending.setdefault("requesters", [])
+                already_pending = sender_id in requesters
+                if not already_pending:
+                    requesters.append(sender_id)
+                    pending["requesters"] = sorted(set(requesters))
+                    await self._save_state(group_id, state)
+                if already_pending:
+                    return event.plain_result(
+                        f"{game}伙伴的创建申请正在等待管理员审核。"
+                    )
+                return event.plain_result(
+                    f"已申请创建{game}伙伴。管理员审核通过后你会自动加入；"
+                    f"管理员请输入 /同意创建{game}伙伴 "
+                    f"或 /拒绝创建{game}伙伴。"
+                )
+            if record is None:
+                record = self._ensure_game(state, game, sender_id)
+                created_directly = True
+                pending = state["pending_creations"].pop(key, None)
+                if isinstance(pending, dict):
+                    record["members"] = sorted(
+                        {
+                            str(uid)
+                            for uid in pending.get("requesters", [])
+                            if str(uid).strip()
+                        }
+                    )
             if sender_id in record["members"]:
+                if created_directly:
+                    await self._save_state(group_id, state)
+                    return event.plain_result(
+                        f"创建并加入{record['name']}伙伴成功，"
+                        f"当前共 {len(record['members'])} 人。"
+                    )
                 return event.plain_result(f"你已经是{record['name']}伙伴了。")
             record["members"].append(sender_id)
             record["members"] = sorted(set(record["members"]))
@@ -115,7 +164,12 @@ class NongPartnerPlugin(Star):
         expires_at = time.time() + minutes * 60
         async with self._group_locks[group_id]:
             state = await self._load_state(group_id)
-            record = self._ensure_game(state, game, sender_id)
+            record = state["games"].get(game_key(game))
+            if record is None:
+                return event.plain_result(
+                    f"{game}伙伴尚未创建。"
+                    f"请先用 /加入{game}伙伴 提交创建申请。"
+                )
             if (
                 self._bool_config("invite_requires_membership", False)
                 and sender_id not in record["members"]
@@ -160,7 +214,11 @@ class NongPartnerPlugin(Star):
                 self._remove_invite(state, key, sender_id)
                 await self._save_state(group_id, state)
                 return event.plain_result("这条邀请已过期，请让群友重新邀请。")
-            record = self._ensure_game(state, game, str(invite.get("inviter", "")))
+            record = state["games"].get(key)
+            if record is None:
+                self._remove_invite(state, key, sender_id)
+                await self._save_state(group_id, state)
+                return event.plain_result(f"{game}伙伴已不存在，该邀请已失效。")
             record["members"] = sorted(set(record["members"] + [sender_id]))
             self._remove_invite(state, key, sender_id)
             await self._save_state(group_id, state)
@@ -246,6 +304,90 @@ class NongPartnerPlugin(Star):
             chain.extend([Comp.At(qq=uid), Comp.Plain(" ")])
         return event.chain_result(chain)
 
+    async def _approve_creation(
+        self, event, group_id: str, sender_id: str, game: str
+    ):
+        if not event.is_admin():
+            return event.plain_result("只有 AstrBot 管理员才能审核伙伴创建申请。")
+        key = game_key(game)
+        async with self._group_locks[group_id]:
+            state = await self._load_state(group_id)
+            if key in state["games"]:
+                return event.plain_result(f"{game}伙伴已经存在。")
+            pending = state["pending_creations"].get(key)
+            if not pending:
+                return event.plain_result(f"没有待审核的{game}伙伴创建申请。")
+            requesters = sorted(
+                {str(uid) for uid in pending.get("requesters", []) if str(uid).strip()}
+            )
+            record = self._ensure_game(state, str(pending.get("name", game)), sender_id)
+            record["members"] = requesters
+            record["approved_by"] = sender_id
+            record["approved_at"] = time.time()
+            state["pending_creations"].pop(key, None)
+            await self._save_state(group_id, state)
+
+        chain: list[Any] = [
+            Comp.Plain(f"已同意创建{record['name']}伙伴。申请者已自动加入：")
+        ]
+        for uid in requesters:
+            chain.extend([Comp.At(qq=uid), Comp.Plain(" ")])
+        return event.chain_result(chain)
+
+    async def _deny_creation(self, event, group_id: str, sender_id: str, game: str):
+        del sender_id
+        if not event.is_admin():
+            return event.plain_result("只有 AstrBot 管理员才能审核伙伴创建申请。")
+        key = game_key(game)
+        async with self._group_locks[group_id]:
+            state = await self._load_state(group_id)
+            pending = state["pending_creations"].pop(key, None)
+            if not pending:
+                return event.plain_result(f"没有待审核的{game}伙伴创建申请。")
+            await self._save_state(group_id, state)
+        return event.plain_result(f"已拒绝创建{pending.get('name', game)}伙伴。")
+
+    async def _delete_game(self, event, group_id: str, sender_id: str, game: str):
+        del sender_id
+        if not event.is_admin():
+            return event.plain_result("只有 AstrBot 管理员才能删除伙伴。")
+        key = game_key(game)
+        async with self._group_locks[group_id]:
+            state = await self._load_state(group_id)
+            record = state["games"].pop(key, None)
+            if record is None:
+                return event.plain_result(f"{game}伙伴不存在。")
+            state["invites"].pop(key, None)
+            state["cooldowns"].pop(key, None)
+            state["pending_creations"].pop(key, None)
+            await self._save_state(group_id, state)
+        return event.plain_result(
+            f"已删除{record['name']}伙伴及其 {len(record['members'])} 名成员数据。"
+        )
+
+    async def _list_pending(self, event, group_id: str):
+        if not event.is_admin():
+            return event.plain_result("只有 AstrBot 管理员才能查看待审核伙伴。")
+        async with self._group_locks[group_id]:
+            state = await self._load_state(group_id)
+            pending = sorted(
+                (
+                    str(item.get("name", key)),
+                    len(item.get("requesters", [])),
+                )
+                for key, item in state["pending_creations"].items()
+                if isinstance(item, dict)
+            )
+        if not pending:
+            return event.plain_result("当前没有待审核的伙伴创建申请。")
+        lines = ["待审核伙伴："]
+        lines.extend(f"• {name}：{count} 人申请" for name, count in pending)
+        lines.append(
+            "使用 /同意创建<游戏>伙伴 "
+            "或 /拒绝创建<游戏>伙伴 处理。"
+        )
+        return event.plain_result("\n".join(lines))
+
     async def _list_games(self, event, group_id: str):
         async with self._group_locks[group_id]:
             state = await self._load_state(group_id)
@@ -281,6 +423,7 @@ class NongPartnerPlugin(Star):
                 "games": {},
                 "invites": {},
                 "cooldowns": {},
+                "pending_creations": {},
                 "migrated_nong": False,
             }
         if not isinstance(raw.get("games"), dict):
@@ -289,6 +432,8 @@ class NongPartnerPlugin(Star):
             raw["invites"] = {}
         if not isinstance(raw.get("cooldowns"), dict):
             raw["cooldowns"] = {}
+        if not isinstance(raw.get("pending_creations"), dict):
+            raw["pending_creations"] = {}
 
         if not raw.get("migrated_nong"):
             old_members = await self.get_kv_data(f"nong_partners:{group_id}", [])
@@ -343,6 +488,12 @@ class NongPartnerPlugin(Star):
             "• /查看<游戏>伙伴：查看成员\n"
             "• /伙伴列表：查看本群的全部游戏\n"
             "• /我的伙伴：查看自己加入的游戏\n"
+            "\n首次加入新游戏时会提交创建审核。\n"
+            "管理员指令：\n"
+            "• /待审核伙伴：查看申请\n"
+            "• /同意创建<游戏>伙伴\n"
+            "• /拒绝创建<游戏>伙伴\n"
+            "• /删除<游戏>伙伴\n"
             f"\n只有该游戏伙伴能召集；当前召集冷却为 {cooldown} 秒。"
         )
 

@@ -1,4 +1,10 @@
 {
+  "require_creation_approval": {
+    "description": "创建新游戏伙伴需要 AstrBot 管理员审核",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后，群友首次使用 /加入<游戏>伙伴 时会直接创建。"
+  },
   "summon_cooldown_seconds": {
     "description": "召集冷却时间（秒）",
     "type": "int",
